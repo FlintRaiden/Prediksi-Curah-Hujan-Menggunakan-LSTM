@@ -1,0 +1,8 @@
+# Untuk menjalankan notebook di lokal (TIDAK dipakai Vercel)
+tensorflow>=2.16
+scikit-learn>=1.4
+joblib
+pandas
+numpy
+matplotlib
+jupyter

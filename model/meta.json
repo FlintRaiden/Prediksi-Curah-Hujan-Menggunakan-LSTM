@@ -1,0 +1,54 @@
+{
+  "features": [
+    "precip",
+    "temp_avg",
+    "temp_max",
+    "temp_min",
+    "wind_speed",
+    "wind_dir",
+    "week_sin",
+    "week_cos"
+  ],
+  "target": "precip",
+  "target_idx": 0,
+  "timesteps": 4,
+  "scaler_min": [
+    0.0,
+    -13.0,
+    -8.0,
+    -23.0,
+    0.0,
+    0.0,
+    -1.0,
+    -1.0
+  ],
+  "scaler_max": [
+    8.93030999999999,
+    100.0,
+    111.0,
+    88.0,
+    20.28061999999998,
+    36.0,
+    1.0,
+    0.992708874098054
+  ],
+  "split_date": "2016-10-23",
+  "n_lstm": 2,
+  "metrics": [
+    {
+      "model": "LSTM",
+      "RMSE": 0.7848,
+      "MAE": 0.4577
+    },
+    {
+      "model": "Persistence (minggu lalu)",
+      "RMSE": 0.9964,
+      "MAE": 0.5625
+    },
+    {
+      "model": "Rata-rata latih",
+      "RMSE": 0.8377,
+      "MAE": 0.581
+    }
+  ]
+}

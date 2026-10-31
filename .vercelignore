@@ -1,0 +1,6 @@
+notebooks/
+build_nb.py
+data/weather.csv
+model/lstm_model.h5
+model/scaler.joblib
+requirements-notebook.txt

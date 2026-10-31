@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prediksi Curah Hujan Mingguan - LSTM</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f5f7fa; --card:#fff; --text:#1c2733; --muted:#6b7a8a; --border:#e1e6ec; --accent:#2563eb; --accent2:#f59e0b; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#10151c; --card:#18202a; --text:#e6ebf1; --muted:#8fa0b2; --border:#27323f; --accent:#60a5fa; --accent2:#fbbf24; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); line-height:1.5; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: .92rem; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:16px; }
+  .row { display:flex; gap:16px; flex-wrap:wrap; }
+  .row > .card { flex:1 1 220px; margin-bottom:0; }
+  label { font-size:.85rem; color:var(--muted); display:block; margin-bottom:6px; }
+  select { width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:1rem; }
+  .big { font-size:2rem; font-weight:700; }
+  .unit { font-size:.9rem; color:var(--muted); font-weight:400; }
+  .small { font-size:.82rem; color:var(--muted); }
+  h2 { font-size:1.05rem; margin:0 0 10px; }
+  .chart { position:relative; height:320px; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; }
+  th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--border); }
+  th { color:var(--muted); font-weight:500; }
+  .note { font-size:.82rem; color:var(--muted); margin-top:8px; }
+  .err { color:#dc2626; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Prediksi Curah Hujan Mingguan</h1>
+  <p class="sub">Model LSTM · {{ n_stations }} stasiun cuaca · {{ n_weeks }} minggu data ({{ date_min }} s.d. {{ date_max }}) · input: {{ timesteps }} minggu terakhir</p>
+
+  <div class="card">
+    <label for="station">Pilih stasiun</label>
+    <select id="station"><option value="ALL">Memuat…</option></select>
+    <div id="error" class="err small"></div>
+  </div>
+
+  <div class="row" style="margin-bottom:16px">
+    <div class="card">
+      <div class="small">Prediksi minggu berakhir <span id="nextDate">-</span></div>
+      <div class="big"><span id="nextIn">-</span> <span class="unit">inci</span></div>
+      <div class="small">≈ <span id="nextMm">-</span> mm</div>
+    </div>
+    <div class="card">
+      <div class="small" id="rmseLabel">RMSE stasiun ini (periode uji)</div>
+      <div class="big"><span id="rmse">-</span> <span class="unit">inci</span></div>
+      <div class="small">MAE: <span id="mae">-</span> inci</div>
+    </div>
+    <div class="card">
+      <div class="small">Rata-rata hujan seminggu (stasiun ini)</div>
+      <div class="big"><span id="avg">-</span> <span class="unit">inci</span></div>
+      <div class="small">Maks: <span id="max">-</span> inci</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Data historis curah hujan mingguan</h2>
+    <div class="chart"><canvas id="histChart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Aktual vs prediksi LSTM</h2>
+    <div class="chart"><canvas id="predChart"></canvas></div>
+    <div class="note">Garis oranye putus-putus = prediksi satu minggu ke depan dari 4 minggu sebelumnya. Titik terakhir adalah peramalan minggu setelah data terakhir. Area setelah <b id="splitDate">-</b> adalah periode uji (tidak dipakai saat training).</div>
+  </div>
+
+  <div class="card">
+    <h2>Evaluasi model (seluruh stasiun, periode uji)</h2>
+    <table>
+      <tr><th>Model</th><th>RMSE (inci)</th><th>MAE (inci)</th></tr>
+      {% for m in metrics %}
+      <tr><td>{{ m.model }}</td><td>{{ '%.4f'|format(m.RMSE) }}</td><td>{{ '%.4f'|format(m.MAE) }}</td></tr>
+      {% endfor %}
+    </table>
+    <div class="note">Curah hujan mingguan sangat acak, sehingga model hanya sedikit lebih baik dari baseline rata-rata. Data hanya mencakup sekitar satu tahun, jadi pola musiman tahunan belum dapat dipelajari penuh.</div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let histChart, predChart;
+const fmt = (v, d=2) => (v === null || v === undefined) ? '-' : Number(v).toFixed(d);
+
+function line(label, data, color, extra={}) {
+  return Object.assign({label, data, borderColor:color, backgroundColor:color, borderWidth:2, pointRadius:0, tension:.2}, extra);
+}
+
+function render(d) {
+  const avg = d.precip.reduce((a,b)=>a+b,0)/d.precip.length;
+  $('nextDate').textContent = d.next_date;
+  $('nextIn').textContent = fmt(d.next_pred);
+  $('nextMm').textContent = fmt(d.next_pred*25.4, 1);
+  $('rmseLabel').textContent = d.label.startsWith('Rata-rata') ? 'RMSE deret rata-rata (periode uji; tidak sebanding dgn RMSE per stasiun)' : 'RMSE stasiun ini (periode uji)';
+  $('rmse').textContent = fmt(d.rmse_station);
+  $('mae').textContent = fmt(d.mae_station);
+  $('avg').textContent = fmt(avg);
+  $('max').textContent = fmt(Math.max(...d.precip));
+  $('splitDate').textContent = d.split_date;
+
+  if (histChart) histChart.destroy();
+  histChart = new Chart($('histChart'), {
+    type:'line',
+    data:{labels:d.dates, datasets:[line('Curah hujan (inci)', d.precip, '#2563eb', {fill:true, backgroundColor:'rgba(37,99,235,.12)'})]},
+    options:{maintainAspectRatio:false, interaction:{mode:'index', intersect:false},
+             scales:{y:{title:{display:true,text:'inci / minggu'}, beginAtZero:true}, x:{ticks:{maxTicksLimit:8}}}}
+  });
+
+  // Dataset prediksi: periode latih (tipis) & periode uji (tebal) + titik peramalan
+  const n = d.back_dates.length;
+  const labels = d.back_dates.concat([d.next_date]);
+  const actual = d.back_actual.concat([null]);
+  const predTrain = d.back_pred.map((v,i)=> d.is_test[i] ? null : v).concat([null]);
+  // sambungkan segmen uji dengan titik terakhir latih supaya garis tidak terputus
+  const firstTest = d.is_test.indexOf(true);
+  const predTest = d.back_pred.map((v,i)=> d.is_test[i] ? v : null).concat([d.next_pred]);
+  if (firstTest > 0) predTrain[firstTest] = d.back_pred[firstTest];
+  const fc = new Array(n).fill(null).concat([d.next_pred]);
+  fc[n-1] = d.back_pred[n-1];
+
+  if (predChart) predChart.destroy();
+  predChart = new Chart($('predChart'), {
+    type:'line',
+    data:{labels, datasets:[
+      line('Aktual', actual, '#2563eb', {pointRadius:2}),
+      line('Prediksi (periode latih)', predTrain, '#9ca3af', {borderDash:[4,4], borderWidth:1.5}),
+      line('Prediksi (periode uji)', predTest, '#f59e0b', {borderDash:[6,4], pointRadius:2}),
+      line('Peramalan', fc, '#dc2626', {pointRadius:(c)=> c.dataIndex===n ? 6 : 0, borderDash:[2,2]})
+    ]},
+    options:{maintainAspectRatio:false, interaction:{mode:'index', intersect:false}, spanGaps:false,
+             scales:{y:{title:{display:true,text:'inci / minggu'}, beginAtZero:true}, x:{ticks:{maxTicksLimit:8}}}}
+  });
+}
+
+async function load(code) {
+  $('error').textContent = '';
+  try {
+    const r = await fetch('/api/forecast/' + encodeURIComponent(code));
+    if (!r.ok) throw new Error('Gagal memuat data (' + r.status + ')');
+    render(await r.json());
+  } catch (e) { $('error').textContent = e.message; }
+}
+
+(async function init() {
+  const sel = $('station');
+  try {
+    const st = await (await fetch('/api/stations')).json();
+    sel.innerHTML = '<option value="ALL">Rata-rata seluruh stasiun</option>' +
+      st.map(s => `<option value="${s.code}">${s.label}</option>`).join('');
+    sel.addEventListener('change', () => load(sel.value));
+    load('ALL');
+  } catch (e) { $('error').textContent = 'Gagal memuat daftar stasiun.'; }
+})();
+</script>
+</body>
+</html>
