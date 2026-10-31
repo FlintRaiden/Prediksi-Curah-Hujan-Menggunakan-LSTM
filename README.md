@@ -27,13 +27,3 @@ jupyter notebook notebooks/01_modeling.ipynb            # Run All -> regenerasi 
 pip install -r requirements.txt
 python app.py                                           # http://127.0.0.1:5000
 ```
-
-## Deploy (GitHub -> Vercel)
-```bash
-git init && git add . && git commit -m "Prediksi curah hujan LSTM"
-git branch -M main
-git remote add origin https://github.com/<user>/<repo>.git
-git push -u origin main
-```
-Lalu di vercel.com: **Add New → Project → Import** repositori tersebut → Deploy (preset otomatis terdeteksi sebagai Flask, tidak perlu build command).
-Setelah ini, setiap `git push` ke `main` akan men-deploy ulang otomatis.
